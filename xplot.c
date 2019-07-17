@@ -797,7 +797,7 @@ void display_plotter(PLOTTER pl)
   {
     char *geom = XGetDefault (pl->dpy, global_argv[0], "geometry");
     int x = 10, y = 70, borderw = 1;
-    unsigned int width = 400, height = 400;
+    unsigned int width = 1200, height = 600;
     int flags = 0;
     int i;
 
