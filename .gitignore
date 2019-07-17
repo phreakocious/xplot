@@ -1,0 +1,6 @@
+/configure
+/config.*
+/Makefile
+version_string.c
+xplot
+*.o
