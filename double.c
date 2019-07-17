@@ -30,8 +30,10 @@ the software.  Title to copyright in this software and any associated
 documentation shall at all times remain with M.I.T., and USER agrees
 to preserve same.
 */
-#include "xplot.h"
+#include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
+#include "xplot.h"
 
 extern double atof();
 
@@ -43,6 +45,8 @@ extern double remainder();
 char *
 double_unparse(coord c)
 {
+  extern void panic();
+
   char *r;
   char buf[50];
 
@@ -53,7 +57,7 @@ double_unparse(coord c)
 
   r = malloc((unsigned) strlen(buf)+1);
   if (r == 0)
-    fatalerror("malloc returned 0");
+    panic("malloc returned 0");
   (void) strcpy(r, buf);
   return r;
 }

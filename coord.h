@@ -30,6 +30,10 @@ the software.  Title to copyright in this software and any associated
 documentation shall at all times remain with M.I.T., and USER agrees
 to preserve same.
 */
+
+#ifndef COORD_H
+#define COORD_H
+
 #ifdef TRUE
 #undef TRUE
 #endif
@@ -54,6 +58,11 @@ struct coord_impl {
 };
 
 #define cmp_coord(ctype, c1, c2) (impls[(int)ctype]->cmp(c1,c2))
+
+#ifdef TCPTRACE
+/* Mark Allman's triangulation distance tool */
+#define sub_coord(ctype, c1, c2) (impls[(int)ctype]->subtract(c1,c2))
+#endif /* TCPTRACE */
 
 coord_type parse_coord_name(char *s);
 char *unparse_coord(coord_type ctype, coord c);
@@ -80,3 +89,5 @@ void drag_coord(coord_type ctype, coord first, coord last,
 #ifdef cmp_coord
 extern struct coord_impl *impls[];
 #endif
+
+#endif /* COORD_H */

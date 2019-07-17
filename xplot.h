@@ -34,6 +34,7 @@ to preserve same.
 #ifndef _xplot_h_
 #define _xplot_h_
 
+#include <sys/time.h>
 #include "config.h"
 
 #ifdef HAVE_LIBX11
@@ -45,7 +46,7 @@ to preserve same.
 #ifdef STDC_HEADERS
 #include <stdlib.h>
 #else
-#include <malloc.h>
+#include <stdlib.h>
 #endif
 
 #ifdef HAVE_LIBM
@@ -69,6 +70,13 @@ typedef enum { U_INT, INT, TIMEVAL, DOUBLE, DTIME} coord_type;
 
 #include "coord.h"
 
+#ifdef ultrix
+double rint();     /* YMUL! some versions of ultrix omit this from math.h! */
+#endif
+
+/* allow error checking on all malloc() calls */
+void *MALLOC(int nbytes);
+#define malloc MALLOC
 
 /* prototypes */
 void panic(char *s);

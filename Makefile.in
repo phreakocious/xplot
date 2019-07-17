@@ -34,10 +34,14 @@
 # to preserve same.
 # 
 
-DEFINES= 
+#
+# include "-DTCPTRACE" to get the unofficial modifications and bug fixes
+# from the tcptrace project
+#
+DEFINES=-DTCPTRACE
 
 CC= @CC@
-CFLAGS=@CFLAGS@ ${DEFINES}
+CFLAGS=@CFLAGS@ ${DEFINES} @DEFS@
 LIBS= @LIBS@
 
 INSTALL = @INSTALL@

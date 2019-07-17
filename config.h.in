@@ -15,11 +15,14 @@
 /* Define if the X Window System is missing or not being used.  */
 #undef X_DISPLAY_MISSING
 
-/* Define if your struct tm has gmtoff */
-#undef HAVE_TM_GMTOFF
+/* Define if your <time.h> has extern time_t altzone */
+#undef HAS_ALTZONE
 
 /* Define if you have the X11 library (-lX11).  */
 #undef HAVE_LIBX11
 
 /* Define if you have the m library (-lm).  */
 #undef HAVE_LIBM
+
+/* Define if your struct tm has tm_gmtoff */
+#undef TM_GMTOFF

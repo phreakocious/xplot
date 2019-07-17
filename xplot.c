@@ -39,8 +39,14 @@ to preserve same.
  by Shawn D. Ostermann (@cs.ohiou.edu).   
 */
 
-#include "xplot.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "xplot.h"
+#include "coord.h"
 
 #ifdef HAVE_LIBX11
 #include <X11/Xlib.h>
@@ -49,6 +55,7 @@ to preserve same.
 #else
 #error xplot requires x11
 #endif
+
 
 #include <ctype.h>
 
@@ -222,7 +229,7 @@ typedef struct plotter {
   xpcolor_t current_color;
   XColor foreground_color;
   XColor background_color;
-  bool thick;
+  bool thick; 
 } *PLOTTER;
 
 PLOTTER the_plotter_list;
@@ -232,6 +239,9 @@ int option_mono;
 int global_argc;
 char **global_argv;
 
+#ifdef TCPTRACE
+int show_dist = 0;
+#endif /* TCPTRACE */
 
 
 command *new_command(struct plotter *pl)
@@ -702,7 +712,7 @@ void new_plotter(FILE *fp, Display *dpy, int numtiles, int tileno, int lineno)
     pl->clean = 0;
     pl->default_color = -1;
     pl->current_color = -1;
-    pl->thick = option_thick? TRUE: FALSE;
+    pl->thick = option_thick? TRUE: FALSE; 
 
     r = get_input(fp, dpy, lineno, pl);
     lineno = r;
@@ -790,7 +800,7 @@ void display_plotter(PLOTTER pl)
     unsigned int width = 400, height = 400;
     int flags = 0;
     int i;
-    
+
     for (i = 1 ; i < global_argc ; i++) {
       if (strcmp("-geometry", global_argv[i]) == 0) {
 	if (i+1 < global_argc) {
@@ -1286,6 +1296,103 @@ void draw_pointer_marks(PLOTTER pl, GC gc)
   case DRAG:
     XDrawLine(pl->dpy, pl->win, gc,
 	      pl->dragstart.x, pl->dragstart.y, pl->dragend.x, pl->dragend.y);
+#ifdef TCPTRACE
+    if (show_dist)
+    {
+	lXPoint p;
+	float pwidth = pl->size.x, pheight = pl->size.y;
+	long pxdist, pydist;
+	coord axdist, aydist;
+	float xscale, yscale;
+	char tmp [100], *s;
+	double xdist, ydist, slope, hyp_dist;
+
+	XDrawLine(pl->dpy, pl->win, gc,
+		  pl->dragstart.x, pl->dragstart.y, pl->dragstart.x, 
+		  pl->dragend.y);
+	XDrawLine(pl->dpy, pl->win, gc,
+		  pl->dragstart.x, pl->dragend.y, pl->dragend.x, 
+		  pl->dragend.y);
+
+	pxdist = pl->dragend.x - pl->dragstart.x;
+	pydist = pl->dragstart.y - pl->dragend.y;
+	xscale = pxdist / pwidth;
+	yscale = pydist / pheight;
+
+	axdist = sub_coord (pl->x_type,pl_x_right,pl_x_left);
+	aydist = sub_coord (pl->y_type,pl_y_top,pl_y_bottom);
+
+	if (pl->x_type != TIMEVAL)
+	{
+	    s = unparse_coord (pl->x_type,axdist);
+	    xdist = atof (s);
+	    free(s);
+	}
+	else
+	    xdist = axdist.t.tv_sec + axdist.t.tv_usec / 1000000.0;
+	xdist *= xscale;
+
+	if (pl->y_type != TIMEVAL)
+	{
+	    s = unparse_coord (pl->y_type,aydist);
+	    ydist = atof (s);
+	    free(s);
+	}
+	else
+	    ydist = aydist.t.tv_sec + aydist.t.tv_usec / 1000000.0;
+	ydist *= yscale;
+
+	slope = ydist / xdist;
+	hyp_dist = sqrt ((xdist * xdist) + (ydist * ydist));
+
+	if (xdist > 0)
+	    p.x = pl->dragstart.x - 65;
+	else
+	    p.x = pl->dragstart.x + 10;
+	p.y = pl->dragstart.y - (pydist / 2);
+	sprintf (tmp,"%.3f %s", ydist,
+		 (pl->y_units&&*pl->y_units)?pl->y_units:
+		 pl->y_type == TIMEVAL?"sec":
+		 "");
+	XDrawString(pl->dpy, pl->win, gc, p.x, p.y, tmp, strlen(tmp));
+
+	p.x = pl->dragstart.x + (pxdist / 2);
+	if (ydist > 0)
+	    p.y = pl->dragend.y - 5;
+	else
+	    p.y = pl->dragend.y + 15;
+	sprintf (tmp,"%.3f %s", xdist,
+		 (pl->x_units&&*pl->x_units)?pl->x_units:
+		 pl->x_type == TIMEVAL?"sec":
+		 "");
+	XDrawString(pl->dpy, pl->win, gc, p.x, p.y, tmp, strlen(tmp));
+
+	p.x = ((pl->dragend.x - pl->dragstart.x) / 2) + pl->dragstart.x;
+	p.y = ((pl->dragend.y - pl->dragstart.y) / 2) + pl->dragstart.y;
+	if (xdist > 0)
+	    p.x += 15;
+	else
+	    p.x -= 85;
+	if (ydist > 0)
+	    p.y += 10;
+	else
+	    p.y -= 20;
+	sprintf (tmp,"s = %.3f %s/%s", slope,
+		 ((pl->y_units&&*pl->y_units)?pl->y_units:pl->y_type == TIMEVAL?"sec":"units"),
+                 ((pl->x_units&&*pl->x_units)?pl->x_units:pl->x_type == TIMEVAL?"sec":"units")
+		 );
+//	sprintf (tmp,"s = %.3f", slope);
+	XDrawString(pl->dpy, pl->win, gc, p.x, p.y, tmp, strlen(tmp));
+/* Removed the diagonal distance, it is wrong. The value was being calculated
+ * without taking into account the units of the x & y axis. Since it is not 
+ * always possible to convert the different axis types from one form to the other,
+ * it is safe to remove this value all together.
+        p.y += 15;
+	sprintf (tmp,"d = %.3f", hyp_dist);
+	XDrawString(pl->dpy, pl->win, gc, p.x, p.y, tmp, strlen(tmp));
+ */ 
+    }
+#endif /* TCPTRACE */
     break;
 
   default:
@@ -1321,18 +1428,60 @@ int main(int argc, char *argv[])
   global_argc = argc;
   global_argv = argv;
 
+#ifdef TCPTRACE
+  {
+      extern char* version_string;
+      printf("Based on Tim Shepard's version 0.90.7 xplot\n");
+      printf("Tcptrace-hosted version: %s\n", version_string);
+  }
+#endif /* TCPTRACE */
+
   /* Look for -v or -version argument */
   for (i = 1; i < argc && *argv[i] == '-'; i++) {
     if (strcmp ("-v", argv[i]) == 0
+#ifdef TCPTRACE
+	|| (strcmp ("--version", argv[i]) == 0)
+#endif /* TCPTRACE */
 	|| strcmp ("-version", argv[i]) == 0) {
       extern char* version_string;
       printf("xplot version %s\n", version_string);
-#if 0
-      printf("sizeof command is %d\n", sizeof(command));
-      printf("sizeof plotter is %d\n", sizeof(struct plotter));
-#endif
       exit(0);
     }
+#ifdef TCPTRACE
+    if ((strcmp ("-h", argv[i]) == 0)
+	|| (strcmp ("-help", argv[i]) == 0)
+	|| (strcmp ("--help", argv[i]) == 0)) {
+        fprintf(stderr,"\n");
+	fprintf(stderr,"usage: %s [options] file [files]\n", argv[0]);
+       	fprintf(stderr,"------\n\n");
+	fprintf(stderr, "Options:\n");
+	fprintf(stderr, "--------\n");
+	fprintf(stderr, " -x               synchronize the x axis of all displayed files\n");
+	fprintf(stderr, " -y               synchronize the y axis of all displayed files\n");
+	fprintf(stderr, " -tile            adjust initial sizes to fit multiple files on screen\n");
+	fprintf(stderr, " -mono            monochrome output\n");
+	fprintf(stderr, " -1               show each file one at a time, rather than all at once\n");
+        fprintf(stderr, " -d               specify display\n");
+	fprintf(stderr, " -d2              specify second display (for group viewing)\n");
+	fprintf(stderr, " -geometry        WxH[+X+Y] (understands standard X11 geometry)\n");
+	fprintf(stderr, " -display         same as -d\n");
+        fprintf(stderr, " -thick           draw the plots with a thick stroke\n");
+	fprintf(stderr, " -version         print version information\n");
+	fprintf(stderr, " -help            show this help screen\n");
+	fprintf(stderr, "\n");       
+	fprintf(stderr, "Mouse Bindings:\n");
+	fprintf(stderr, "---------------\n");       
+	fprintf(stderr, " left             draw rectangle to zoom in, click to zoom out\n");
+	fprintf(stderr, " middle           drag to scroll window\n");
+	fprintf(stderr, " right            quit\n");
+	fprintf(stderr, " SHIFT + left     drop postscript file\n");
+	fprintf(stderr, " SHIFT + middle   drop postscript file, smaller image\n");
+	fprintf(stderr, " SHIFT + right    drop postscript file, less verticle space\n");
+	fprintf(stderr, " CTRL  + middle   drag out a box showing dimensions\n");
+	fprintf(stderr, "\n");
+	exit(0);
+    }
+#endif /* TCPTRACE */
   }
 
   i = 1;
@@ -1357,11 +1506,19 @@ int main(int argc, char *argv[])
 	i++;
 	if (dpy == 0) {
 	  dpy = XOpenDisplay(argv[i]);
+#ifdef TCPTRACE
+	  if (dpy == NULL) fatalerror("could not open display");
+#else /* TCPTRACE */
 	  if (dpy == NULL) panic("could not open display");
+#endif /* TCPTRACE */
 	} else {
 	  if (dpy2 == 0) {
 	    dpy2 = XOpenDisplay(argv[i]);
+#ifdef TCPTRACE
+	    if (dpy2 == NULL) fatalerror("could not open display");
+#else /* TCPTRACE */
 	    if (dpy2 == NULL) panic("could not open display");
+#endif /* TCPTRACE */
 	  } else {
 	    panic("too many displays");
 	  }
@@ -1371,7 +1528,11 @@ int main(int argc, char *argv[])
 	i++;
 	if (dpy2 == 0) {
 	  dpy2 = XOpenDisplay(argv[i]);
+#ifdef TCPTRACE
+	  if (dpy2 == NULL) fatalerror("could not open display");
+#else /* TCPTRACE */
 	  if (dpy2 == NULL) panic("could not open display");
+#endif /* TCPTRACE */
 	} else {
 	  panic("too many d2's");
 	}
@@ -1385,7 +1546,11 @@ int main(int argc, char *argv[])
 	       
   if (dpy == 0) {
     dpy = XOpenDisplay("");
-    if (dpy == NULL) panic("could not open display");
+#ifdef TCPTRACE
+	  if (dpy == NULL) fatalerror("could not open display");
+#else /* TCPTRACE */
+	  if (dpy == NULL) panic("could not open display");
+#endif /* TCPTRACE */
   }
 
   {
@@ -1535,6 +1700,7 @@ int main(int argc, char *argv[])
       case YLABEL:
 	break;
       }
+
     pl_x_right = bump_coord(pl->x_type, pl_x_right);
     pl_y_top   = bump_coord(pl->y_type, pl_y_top);
 
@@ -1592,7 +1758,6 @@ int main(int argc, char *argv[])
       int visible_count = 0;
       for (ALLPLOTTERS) {
 
-#if 0
 	/* if option_one_at_a_time, ensure that at least last plotter
 	   on list is visible if no others are */ 
 	if (visible_count == 0
@@ -1601,7 +1766,7 @@ int main(int argc, char *argv[])
 	    && option_one_at_a_time
 	    ) 
 	  display_plotter(pl);
-#endif
+
 	/* if plotter is not yet displayed, do nothing */
 	if (pl->win == 0) continue;
 
@@ -2050,6 +2215,11 @@ int main(int argc, char *argv[])
 	pl = savepl;
       }
       pl->buttonsdown += 1;
+
+#ifdef TCPTRACE
+      show_dist = 0;
+#endif /* TCPTRACE */
+
       switch (pl->state) {
       case NORMAL:
 	switch(event.xbutton.button) {
@@ -2067,6 +2237,18 @@ int main(int argc, char *argv[])
 	case Button2:
 	  if (event.xbutton.state & ShiftMask)
 	    pl->state = FIGING;
+#ifdef TCPTRACE
+	  else if (event.xbutton.state & ControlMask)
+	  {
+	      show_dist = 1;
+	      if (event.xbutton.y > pl->size.y + pl->origin.y)
+		  pl->state = HDRAG;
+	      else if (event.xbutton.x < pl->origin.x)
+		  pl->state = VDRAG;
+	      else
+		  pl->state = DRAG;
+	  }
+#endif /* TCPTRACE */
 	  else
 	    if (event.xbutton.y > pl->size.y + pl->origin.y)
 	      pl->state = HDRAG;
@@ -2094,7 +2276,7 @@ int main(int argc, char *argv[])
 	    }
 	  }
 	  break;
-	default:
+	 default:
 	  pl->state = WEDGED;
 	}
 
@@ -2439,6 +2621,10 @@ int main(int argc, char *argv[])
       case DRAG:
       case HDRAG:
       case VDRAG:
+#ifdef TCPTRACE
+	if (!show_dist)
+	{
+#endif /* TCPTRACE */
 	{
 	  PLOTTER savepl = pl;
 
@@ -2476,12 +2662,25 @@ int main(int argc, char *argv[])
 	  pl = savepl;
 	}
         XClearWindow(pl->dpy, pl->win);
+#ifdef TCPTRACE
+	}
+#endif /* TCPTRACE */
 	pl->pointer_marks_on_screen = FALSE;
         pl->state = NORMAL;
         break;
       case EXITING:
 	pl->state = NORMAL;  
-	undisplay_plotter(pl, 0);
+	if (undisplay_plotter(pl, option_one_at_a_time?-1:0) == 0) {
+	  /* went past last plotter */
+	  if (option_one_at_a_time == 0) {
+	    
+	    /* old behavior */
+
+	  } else {
+	    /* we'll loop around, and start at the beginning with a
+               new window */
+	  }
+	}
 	break;
       case PRINTING:
       case FIGING:
@@ -2502,7 +2701,13 @@ int main(int argc, char *argv[])
 	break;
       case BACKINGUP:
 	pl->state = NORMAL;
-	undisplay_plotter(pl, 1);
+	if (undisplay_plotter(pl, option_one_at_a_time?1:0) == 0) {
+	  /* trying to back up before first plotter */
+
+	  /* display the last plotter (the first on the list) */
+	  if (option_one_at_a_time) 
+	    display_plotter(the_plotter_list);
+	}
 	break;
       case WEDGED:
 	if (pl->buttonsdown == 0)
@@ -2826,6 +3031,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
 	parse_coord_name(tokens[1]) == pl->y_type)
       continue;
 
+#define BUFSIZE 1024     
 #define not_ntokens_equal_to_3_or_4	(ntokens != 3 && ntokens != 4)
 #define COLORfromTOK3  (com->color = ntokens == 4 ?\
 			parse_color(tokens[3]) : pl->current_color)
@@ -2966,7 +3172,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       com->yb = parse_coord(pl->y_type, tokens[4]);
       com->color = ntokens == 6 ? parse_color(tokens[5]) : pl->current_color;
     } else if (mystrcmp(tokens[0], "title") == 0) {
-      char buf[1024];
+      char buf[BUFSIZE];
       char *cp;
       buf[0] = '\0';
       (void) fgets(buf, sizeof(buf), fp);
@@ -2980,7 +3186,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       com->type = TITLE;
       com->text = cp;
     } else if (mystrcmp(tokens[0], "ctext") == 0) {
-      char buf[80];
+      char buf[BUFSIZE];
       char *cp;
       buf[0] = '\0';
       if (not_ntokens_equal_to_3_or_4) parseerror("input format error");
@@ -2998,7 +3204,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       com->position = CENTERED;
       COLORfromTOK3;
     } else if (mystrcmp(tokens[0], "atext") == 0) {
-      char buf[80];
+      char buf[BUFSIZE];
       char *cp;
       buf[0] = '\0';
       if (not_ntokens_equal_to_3_or_4) parseerror("input format error");
@@ -3016,7 +3222,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       com->position = ABOVE;
       COLORfromTOK3;
     } else if (mystrcmp(tokens[0], "btext") == 0) {
-      char buf[80];
+      char buf[BUFSIZE];
       char *cp;
       buf[0] = '\0';
       if (not_ntokens_equal_to_3_or_4) parseerror("input format error");
@@ -3034,7 +3240,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       com->position = BELOW;
       COLORfromTOK3;
     } else if (mystrcmp(tokens[0], "ltext") == 0) {
-      char buf[80];
+      char buf[BUFSIZE];
       char *cp;
       buf[0] = '\0';
       if (not_ntokens_equal_to_3_or_4) parseerror("input format error");
@@ -3052,7 +3258,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       com->position = TO_THE_LEFT;
       COLORfromTOK3;
     } else if (mystrcmp(tokens[0], "rtext") == 0) {
-      char buf[80];
+      char buf[BUFSIZE];
       char *cp;
       buf[0] = '\0';
       if (not_ntokens_equal_to_3_or_4) parseerror("input format error");
@@ -3308,11 +3514,11 @@ void emit_PS(struct plotter *pl, FILE *fp, enum plstate state)
    * GDT: 950310: put dot font hack in.
    */
 
-#ifdef SDO
+#ifdef TCPTRACE
   fputs("%!PS\n", fp);
 #else
   fputs("%!PostScript\n", fp);
-#endif
+#endif /* TCPTRACE */
   /* Bracket the PS program with gsave/grestore so these page descriptions
      can be concatenated, then printed. */
   fputs("%%BoundingBox: ", fp);
@@ -3322,19 +3528,17 @@ void emit_PS(struct plotter *pl, FILE *fp, enum plstate state)
   fputs("gsave\n", fp);
 
   /* Set up scale */
-  fputs("\n\
-%/sign { dup 0 gt { pop 1 } { 0 lt { -1 } { 0 } ifelse } ifelse } def\n\
-\n\
-%matrix currentmatrix\n\
-%aload pop\n\
-%6 2 roll sign\n\
-%6 1 roll sign\n\
-%6 1 roll sign\n\
-%6 1 roll sign\n\
-%6 1 roll\n\
-%matrix astore setmatrix\n\
-\n\
-", fp);
+  fputs("%/sign { dup 0 gt { pop 1 } { 0 lt { -1 } { 0 } ifelse } ifelse } def\n"
+        "\n"
+        "%matrix currentmatrix\n"
+        "%aload pop\n"
+        "%6 2 roll sign\n"
+        "%6 1 roll sign\n"
+        "%6 1 roll sign\n"
+        "%6 1 roll sign\n"
+        "%6 1 roll\n"
+        "%matrix astore setmatrix\n"
+        "\n", fp);
 
   fprintf(fp, "72 %d div dup scale\n", PER_INCH);
 
@@ -3342,124 +3546,130 @@ void emit_PS(struct plotter *pl, FILE *fp, enum plstate state)
 
   /* Set up units of measurement. */
   fprintf(fp, "/inch {%d mul} def\n", PER_INCH);
-  fputs("/pt {inch 72 div} def\n\
-%\n\
-%\n\
-/tfont /Times-Bold findfont 12 pt scalefont def\n\
-%\n\
-/lfont /Times-Roman findfont 10 pt scalefont def\n\
-%\n\
-%tfont /FontBBox get\n\
-%  aload pop\n\
-%  tfont /FontMatrix get dtransform pop /tascent exch def\n\
-%  tfont /FontMatrix get dtransform pop neg /tdescent exch def\n\
-lfont /FontBBox get\n\
-  aload pop\n\
-  lfont /FontMatrix get dtransform pop 0.65 mul /lascent exch def\n\
-  lfont /FontMatrix get dtransform pop neg /ldescent exch def\n\
-% begin gdt mod\n\
-% define font for xplot characters\n\
-/BuildCharDict 10 dict def\n\
-/Xplotfontdict 7 dict def\n\
-Xplotfontdict begin\n\
-  /FontType 3 def\n\
-  /FontMatrix [1 0 0 1 0 0] def\n\
-  /FontBBox [-1 -1 1 1]def\n\
-  /Encoding 256 array def\n\
-  0 1 255 {Encoding exch /.notdef put} for\n\
-  Encoding (.) 0 get /xplotfontdot put\n\
-  /CharacterDefs 3 dict def\n\
-  CharacterDefs /.notdef {} put\n\
-  CharacterDefs /xplotfontdot\n\
-    { newpath\n\
-	0 0 1 0 360 arc fill\n\
-    } put\n\
-  /BuildChar\n\
-    { BuildCharDict begin\n\
-	/char exch def\n\
-	/fontdict exch def\n\
-	/charname fontdict /Encoding get\n\
-	char get def\n\
-	/charproc fontdict /CharacterDefs\n\
-        get charname get def\n\
-	1 0 -1 -1 1 1 setcachedevice\n\
-	gsave charproc grestore\n\
-      end\n\
-    } def\n\
-end\n\
-/XplotFont Xplotfontdict definefont pop\n\
-% scale font according to theta\n\
-/dotsetup { /dotfont /XplotFont findfont 4 theta scalefont def } def\n\
-% DONE gdt mod\n\
-%define procedures for each xplot primitive.\n\
-% x y x --\n\
-/x {moveto 8 8 rlineto -16 -16 rlineto\n\
-    8 8 rmoveto\n\
-    -8 8 rlineto 16 -16 rlineto} def\n\
-% x y ?arrow --\n\
-/darrow {moveto 8 theta 8 theta rmoveto -8 theta -8 theta rlineto\n\
-         -8 theta 8 theta rlineto } def\n\
-/uarrow {moveto -8 theta -8 theta rmoveto 8 theta 8 theta rlineto\n\
-         8 theta -8 theta rlineto } def\n\
-/rarrow {moveto -8 theta 8 theta rmoveto 8 theta -8 theta rlineto\n\
-         -8 theta -8 theta rlineto } def\n\
-/larrow {moveto 8 theta 8 theta rmoveto -8 theta -8 theta rlineto\n\
-         8 theta -8 theta rlineto } def\n\
-%x y x y line --\n\
-/line {moveto lineto} def\n\
-%x y dot --\n\
-% begin gdt mod\n\
-/dot { moveto dotfont setfont (.) show } def\n\
-%/dot {stroke 8 theta 0 360 arc fill} def\n\
-% end gdt mod\n\
-%x y plus --\n\
-/plus {moveto -8 theta 0 rmoveto 16 theta 0 rlineto\n\
-       -8 theta -8 theta rmoveto 0 16 theta rlineto} def\n\
-%x y box --\n\
-/box {moveto -8 theta -8 theta rmoveto\n\
-      16 theta 0 rlineto\n\
-      0 16 theta rlineto\n\
-      -16 theta 0 rlineto\n\
-      0 -16 theta rlineto} def\n\
-%x y diamond --\n\
-/diamond { moveto 0 theta 24 theta rmoveto\n\
-           -24 theta -24 theta rlineto\n\
-            24 theta -24 theta rlineto\n\
-            24 theta  24 theta rlineto\n\
-           -24 theta  24 theta rlineto} def\n\
-%x y ?tick --\n\
-/utick {moveto 0 6 theta rlineto} def\n\
-/dtick {moveto 0 -6 theta rlineto} def\n\
-/ltick {moveto -6 theta 0 rlineto} def\n\
-/rtick {moveto 6 theta 0 rlineto} def\n\
-/htick {moveto -6 theta 0 rmoveto 12 theta 0 rlineto} def\n\
-/vtick {moveto 0 -6 theta rmoveto 0 12 theta rlineto} def\n\
-%Separate functions for each text position.\n\
-%x y string ?text --\n\
-/space 6 pt def\n\
-% Set the font, figure out the width.\n\
-% x y string tsetup string x width y\n\
-/tsetup {lfont setfont dup stringwidth pop exch\n\
-         4 1 roll exch} def\n\
-%CENTER\n\
-/ctext {tsetup lascent 2 div sub\n\
-        3 1 roll 2 div sub exch\n\
-% stack should now be string x y\n\
-        moveto show} def\n\
-%ABOVE\n\
-/atext {tsetup space ldescent add add\n\
-        3 1 roll 2 div sub exch moveto show} def\n\
-%BELOW\n\
-/btext {tsetup space lascent add sub\n\
-        3 1 roll 2 div sub exch moveto show} def\n\
-%TO_THE_LEFT\n\
-/ltext {tsetup lascent 2 div sub\n\
-        3 1 roll space add sub exch moveto show} def\n\
-%TO_THE_RIGHT\n\
-/rtext {tsetup lascent 2 div sub\n\
-        3 1 roll pop space add exch moveto show} def\n\
-", fp);
-
+  fputs("/pt {inch 72 div} def\n"
+        "%\n"
+        "%\n"
+        "/tfont /Times-Bold findfont 12 pt scalefont def\n"
+        "%\n"
+        "/lfont /Times-Roman findfont 10 pt scalefont def\n"
+        "%\n"
+        "%tfont /FontBBox get\n"
+        "%  aload pop\n"
+        "%  tfont /FontMatrix get dtransform pop /tascent exch def\n"
+        "%  tfont /FontMatrix get dtransform pop neg /tdescent exch def\n"
+        "lfont /FontBBox get\n"
+        "  aload pop\n"
+        "  lfont /FontMatrix get dtransform pop 0.65 mul /lascent exch def\n"
+        "  lfont /FontMatrix get dtransform pop neg /ldescent exch def\n"
+        "% begin gdt mod\n"
+        "% define font for xplot characters\n"
+        "/BuildCharDict 10 dict def\n"
+        "/Xplotfontdict 7 dict def\n"
+        "Xplotfontdict begin\n"
+        "  /FontType 3 def\n"
+        "  /FontMatrix [1 0 0 1 0 0] def\n"
+        "  /FontBBox [-1 -1 1 1]def\n"
+        "  /Encoding 256 array def\n"
+        "  0 1 255 {Encoding exch /.notdef put} for\n"
+        "  Encoding (.) 0 get /xplotfontdot put\n"
+        "  /CharacterDefs 3 dict def\n"
+        "  CharacterDefs /.notdef {} put\n"
+        "  CharacterDefs /xplotfontdot\n"
+        "    { newpath\n"
+        "	0 0 1 0 360 arc fill\n"
+        "    } put\n"
+        "  /BuildChar\n"
+        "    { BuildCharDict begin\n"
+        "	/char exch def\n"
+        "	/fontdict exch def\n"
+        "	/charname fontdict /Encoding get\n"
+        "	char get def\n"
+        "	/charproc fontdict /CharacterDefs\n"
+        "        get charname get def\n"
+        "	1 0 -1 -1 1 1 setcachedevice\n"
+        "	gsave charproc grestore\n"
+        "      end\n"
+        "    } def\n"
+        "end\n"
+        "/XplotFont Xplotfontdict definefont pop\n"
+        "% scale font according to theta\n"
+        "/dotsetup { /dotfont /XplotFont findfont 4 theta scalefont def } def\n"
+        "% DONE gdt mod\n"
+        "%define procedures for each xplot primitive.\n"
+        "% x y x --\n"
+        "/x {moveto 8 8 rlineto -16 -16 rlineto\n"
+        "    8 8 rmoveto\n"
+        "    -8 8 rlineto 16 -16 rlineto} def\n"
+        "% x y ?arrow --\n"
+        "/darrow {moveto 8 theta 8 theta rmoveto -8 theta -8 theta rlineto\n"
+        "         -8 theta 8 theta rlineto } def\n"
+        "/uarrow {moveto -8 theta -8 theta rmoveto 8 theta 8 theta rlineto\n"
+        "         8 theta -8 theta rlineto } def\n"
+        "/rarrow {moveto -8 theta 8 theta rmoveto 8 theta -8 theta rlineto\n"
+        "         -8 theta -8 theta rlineto } def\n"
+        "/larrow {moveto 8 theta 8 theta rmoveto -8 theta -8 theta rlineto\n"
+        "         8 theta -8 theta rlineto } def\n"
+        "%x y x y line --\n"
+        "/line {moveto lineto} def\n"
+        "%x y dot --\n"
+        "% begin gdt mod\n"
+        "/dot { moveto dotfont setfont (.) show } def\n"
+        "%/dot {stroke 8 theta 0 360 arc fill} def\n"
+        "% end gdt mod\n"
+        "%x y . --\n"
+        "% begin gdt mod\n"
+        "/. { moveto dotfont setfont (.) show } def\n"
+        "%/. {stroke 8 theta 0 360 arc fill} def\n"
+        "% end gdt mod\n"
+        "%x y plus --\n"
+        "/plus {moveto -8 theta 0 rmoveto 16 theta 0 rlineto\n"
+        "       -8 theta -8 theta rmoveto 0 16 theta rlineto} def\n"
+        "%x y + --\n"
+        "/+ {moveto -8 theta 0 rmoveto 16 theta 0 rlineto\n"
+        "       -8 theta -8 theta rmoveto 0 16 theta rlineto} def\n"
+        "%x y box --\n"
+        "/box {moveto -8 theta -8 theta rmoveto\n"
+        "      16 theta 0 rlineto\n"
+        "      0 16 theta rlineto\n"
+        "      -16 theta 0 rlineto\n"
+        "      0 -16 theta rlineto} def\n"
+        "%x y diamond --\n"
+        "/diamond { moveto 0 theta 24 theta rmoveto\n"
+        "           -24 theta -24 theta rlineto\n"
+        "            24 theta -24 theta rlineto\n"
+        "            24 theta  24 theta rlineto\n"
+        "           -24 theta  24 theta rlineto} def\n"
+        "%x y ?tick --\n"
+        "/utick {moveto 0 6 theta rlineto} def\n"
+        "/dtick {moveto 0 -6 theta rlineto} def\n"
+        "/ltick {moveto -6 theta 0 rlineto} def\n"
+        "/rtick {moveto 6 theta 0 rlineto} def\n"
+        "/htick {moveto -6 theta 0 rmoveto 12 theta 0 rlineto} def\n"
+        "/vtick {moveto 0 -6 theta rmoveto 0 12 theta rlineto} def\n"
+        "%Separate functions for each text position.\n"
+        "%x y string ?text --\n"
+        "/space 6 pt def\n"
+        "% Set the font, figure out the width.\n"
+        "% x y string tsetup string x width y\n"
+        "/tsetup {lfont setfont dup stringwidth pop exch\n"
+        "         4 1 roll exch} def\n"
+        "%CENTER\n"
+        "/ctext {tsetup lascent 2 div sub\n"
+        "        3 1 roll 2 div sub exch\n"
+        "% stack should now be string x y\n"
+        "        moveto show} def\n"
+        "%ABOVE\n"
+        "/atext {tsetup space ldescent add add\n"
+        "        3 1 roll 2 div sub exch moveto show} def\n"
+        "%BELOW\n"
+        "/btext {tsetup space lascent add sub\n"
+        "        3 1 roll 2 div sub exch moveto show} def\n"
+        "%TO_THE_LEFT\n"
+        "/ltext {tsetup lascent 2 div sub\n"
+        "        3 1 roll space add sub exch moveto show} def\n"
+        "%TO_THE_RIGHT\n"
+        "/rtext {tsetup lascent 2 div sub\n"
+        "        3 1 roll pop space add exch moveto show} def\n", fp);
   {
     int i;
 
@@ -3504,10 +3714,8 @@ end\n\
   if (state == PRINTING) {
     fputs("-90 rotate -11 inch 0 inch translate\n", fp);
   } else {
-    fputs("\n\
-/notintex { currentdict userdict eq } def\n\
-notintex { 1.5 inch 5.0 inch translate } if\n\
-", fp);
+    fputs("\n/notintex { currentdict userdict eq } def\n"
+          "notintex { 1.5 inch 5.0 inch translate } if\n", fp);
   }
   /* Move origin to create left & bottom margins. */
   fprintf(fp, "%g inch %g inch translate\n", lmargin, bmargin);
@@ -3767,3 +3975,22 @@ make_name_open_file(struct plotter *pl)
   free(name);
   return fp;
 }
+
+
+#ifdef TCPTRACE
+#undef malloc
+void *
+MALLOC(int nbytes)
+{
+    char *ptr;
+
+    if ((ptr = malloc(nbytes)) == NULL) {
+	perror("malloc() virtual memory allocation");
+	fprintf(stderr,"You probably need more swap space to run this file\n");
+	fprintf(stderr,"Exiting...\n");
+	exit(1);
+    }
+
+    return(ptr);
+}
+#endif /* TCPTRACE */

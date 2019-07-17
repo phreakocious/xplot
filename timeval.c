@@ -30,9 +30,24 @@ the software.  Title to copyright in this software and any associated
 documentation shall at all times remain with M.I.T., and USER agrees
 to preserve same.
 */
-#include "xplot.h"
+#include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
+#include "xplot.h"
+
+#ifndef TM_GMTOFF
+extern time_t timezone;
+#ifdef HAS_ALTZONE
+extern time_t altzone;
+#else /* no altzone */
+#define altzone (timezone - 3600)
+#endif /* HAS_ALTZONE */
+#endif /* TM_GMTOFF */
+
+extern int daylight;
+extern char *tzname[2];
+
 
 inline static
 void
@@ -55,6 +70,7 @@ char *timeval_unparse(coord c)
   char *cp;
   char *r;
   char buf[50];
+  extern void panic();
   struct tm *tmp;
   
   tmp = localtime((time_t *) &(c.t.tv_sec));
@@ -81,7 +97,7 @@ char *timeval_unparse(coord c)
   }
   r = malloc((unsigned) strlen(cp)+1);
   if (r == 0)
-    fatalerror("malloc returned 0");
+    panic("malloc returned 0");
   (void) strcpy(r, cp);
   return r;
 }
@@ -166,13 +182,22 @@ coord timeval_round_down(coord c1, coord c2)
 {
   coord r;
   struct tm *tmp;
+  time_t gmtoff;
 
   tmp = localtime((time_t *) &(c1.t.tv_sec));
-
-#ifdef HAVE_TM_GMTOFF
-  c1.t.tv_sec += tmp->tm_gmtoff;
-#endif
-  
+#ifdef TM_GMTOFF
+  gmtoff = tmp->tm_gmtoff;
+#else
+  if (tmp->tm_isdst==0) {
+	gmtoff = -timezone;
+  } else if (tmp->tm_isdst==1) {
+	gmtoff = -altzone;
+  } else {
+	gmtoff = 0;
+  }
+ #endif /* TM_GMTOFF */
+  c1.t.tv_sec += gmtoff;
+ 
   if (c2.t.tv_sec == 0) {
     r.t.tv_sec = c1.t.tv_sec;
     r.t.tv_usec = (c1.t.tv_usec - (c1.t.tv_usec % c2.t.tv_usec));
@@ -181,9 +206,7 @@ coord timeval_round_down(coord c1, coord c2)
     r.t.tv_sec = c1.t.tv_sec - (c1.t.tv_sec % c2.t.tv_sec);
   }
 
-#ifdef HAVE_TM_GMTOFF
-  r.t.tv_sec -= tmp->tm_gmtoff;
-#endif
+  r.t.tv_sec -= gmtoff;
 
   timeval_fix(&r);
   return r;
@@ -194,13 +217,23 @@ coord timeval_round_up(coord c1, coord c2)
 {
   coord r;
   struct tm *tmp;
+  time_t gmtoff;
 
   tmp = localtime((time_t *) &(c1.t.tv_sec));
 
-#ifdef HAVE_TM_GMTOFF
-  c1.t.tv_sec += tmp->tm_gmtoff;
-#endif
-  
+#ifdef TM_GMTOFF
+  gmtoff = tmp->tm_gmtoff;
+#else
+  if (tmp->tm_isdst==0) {
+	gmtoff = -timezone;
+  } else if (tmp->tm_isdst==1) {
+	gmtoff = -altzone;
+  } else {
+	gmtoff = 0;
+  }
+ #endif /* TM_GMTOFF */
+  c1.t.tv_sec += gmtoff;
+ 
   if (c2.t.tv_sec == 0) {
     r.t.tv_sec  = c1.t.tv_sec;
     if (c1.t.tv_usec % c2.t.tv_usec == 0)
@@ -221,9 +254,7 @@ coord timeval_round_up(coord c1, coord c2)
       r.t.tv_sec = c1.t.tv_sec + (c2.t.tv_sec - (c1.t.tv_sec % c2.t.tv_sec));
   }
 
-#ifdef HAVE_TM_GMTOFF
-  r.t.tv_sec -= tmp->tm_gmtoff;
-#endif
+  r.t.tv_sec -= gmtoff;
 
   timeval_fix(&r);
   return r;
@@ -298,8 +329,10 @@ static struct tick_table_s {
 coord timeval_tick(int level)
 {
   coord r;
+  extern void ianic();
 
-  if (level < 0 || level >= sizeof(tick_table) / sizeof(struct tick_table_s))
+
+  if (level < 0 || level >= (int)(sizeof(tick_table) / sizeof(struct tick_table_s)))
     panic("timeval_tick: level too large");
   
   r.t = tick_table[level].step;
@@ -311,8 +344,9 @@ coord timeval_tick(int level)
 int timeval_subtick(int level)
 {
   int r;
+  extern void panic();
 
-  if (level < 0 || level >= sizeof(tick_table) / sizeof(struct tick_table_s))
+  if (level < 0 || level >= (int)(sizeof(tick_table) / sizeof(struct tick_table_s)))
     panic("timeval_subtick: level too large");
   
   r = level + tick_table[level].subtick_offset;

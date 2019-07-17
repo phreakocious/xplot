@@ -1,4 +1,4 @@
-#!/usr/bin/env perl
+#!/usr/local/bin/perl
 # -*- Perl -*-
 #
 # Copyright 1996 Massachusetts Institute of Technology
@@ -244,12 +244,11 @@ for ($lineNo = 1; <$Tcpdump>; $lineNo++) {
     &newConversation($from, $to, $time) if (!(defined($StartTime{$from})));
 
     $opts =~ s/^.*<//;
-    $opts =~ s/>.*//;
+    $opts =~ s/>//;
     @opts = split(/,/,$opts);
 
     for ($i = 0; $i <= $#opts; $i++) {
 	local(@opt);
-	$opts[$i] =~ s/^ sack/sack/;  # some tcpdumps put a stray space at the beginning of "sack" 
 	@opt = split(/ /,$opts[$i]);
 	if ($opt[0] =~ /nop/ || $opt[0] =~ /eol/) {
 	    next;
@@ -399,19 +398,6 @@ for ($lineNo = 1; <$Tcpdump>; $lineNo++) {
 		local(@sacks);
 		local($i);
 
-                # munge newer tcpdump format for SACK so that it looks
-                # just just like my old format
-
-		$sacks =~ s/\{/ /g;
-		$sacks =~ s/\}/ /g;
-
-		# print stderr "SACKS before: $sacks \n";
-
-		$sacks =~ s/^sack [123]  //;
-		$sacks =~ s/^[123]  //;
-
-		# print stderr "SACKS after : $sacks \n";
-
 		@sacks = split(/ /, $sacks);
 		
 		for ($i = 0; $i <= $#sacks; $i++) {
@@ -422,20 +408,14 @@ for ($lineNo = 1; <$Tcpdump>; $lineNo++) {
 		    $start = $1;
 		    $end = $2;
 
-		    # print stderr "SACK start $start end $end \n";
-
 		    if ($Cumulative) {
 			# yikes! what to do?
 		    } else {
 			# adjust sequence number to be relative to start of conversation.
-			# print stderr "SACK relative to $FirstSeq{$to.'-'.$from} \n";
-
 			$start -= $FirstSeq{$to.'-'.$from};
 			$end -= $FirstSeq{$to.'-'.$from};
 
-			# print stderr "SACK line $time $start $time $end green\n";
-			print $to "line $time $start $time $end green\n";
-
+			print $to "line $time $start $time $end green\n"
 		    }
 		}
 	    }
